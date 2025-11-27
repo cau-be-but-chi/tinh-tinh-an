@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chia Tiền Chi Tiêu</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f4f4f9;
+            color: #333;
+        }
+        .container {
+            max-width: 800px;
+            margin: auto;
+            background: white;
+            padding: 25px;
+            border-radius: 10px;
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+        }
+        h2 {
+            color: #007bff;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: center;
+        }
+        th {
+            background-color: #007bff;
+            color: white;
+            font-weight: bold;
+        }
+        td:nth-child(1) {
+            text-align: left;
+            font-weight: bold;
+        }
+        /* Style cho cột Tiền Đóng Góp hiện tại */
+        .contribution-total {
+            font-size: 1.1em;
+            font-weight: bold;
+            color: #28a745;
+        }
+        /* Style cho cột Thêm Chi Tiêu */
+        .add-expense-cell {
+            display: flex;
+            gap: 5px;
+            align-items: center;
+        }
+        .add-expense-cell input[type="number"] {
+            flex-grow: 1;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            text-align: right;
+            width: 60px;
+        }
+        .add-button {
+            padding: 8px 12px;
+            background-color: #28a745;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        .add-button:hover {
+            background-color: #1e7e34;
+        }
+        
+        .summary {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #e9f7ff;
+            border-radius: 6px;
+            border-left: 5px solid #007bff;
+        }
+        .positive {
+            color: #28a745; /* Được nhận (dư) */
+            font-weight: bold;
+        }
+        .negative {
+            color: #dc3545; /* Phải trả (nợ) */
+            font-weight: bold;
+        }
+        .neutral {
+            color: #6c757d; /* Cân bằng */
+            font-weight: bold;
+        }
+        .reset-button {
+            margin-top: 15px;
+            padding: 10px 15px;
+            background-color: #dc3545;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+            width: 100%;
+        }
+        .reset-button:hover {
+            background-color: #c82333;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Nhập Tiền Vào Để Tính</h2>
+    
+    <div class="summary">
+        <p><strong>Tổng Chi Tiêu:</strong> <span id="totalSpent">0 VNĐ</span></p>
+        <p><strong>Mức Chia Đều:</strong> <span id="fairShare">0 VNĐ</span></p>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Tên</th>
+                <th>Tiền Đóng</th>
+                <th>Nhập tiền vào</th>
+                <th>Sau Tính Toán</th>
+            </tr>
+        </thead>
+        <tbody id="contributionTableBody">
+            </tbody>
+    </table>
+    
+    <button class="reset-button" onclick="resetContributions()">Xóa tất cả dữ liệu đã nhập</button>
+</div>
+
+<script>
+    // 1. Cấu trúc dữ liệu cố định (Không nên thay đổi thứ tự các tên trong mảng này)
+    const MEMBER_NAMES = ["Duy", "Vanh", "Sơn", "Heo Pepi", "Trung"];
+    let contributions = {
+        "Duy": 0,
+        "Vanh": 0,
+        "Sơn": 0,
+        "Heo Pepi": 0,
+        "Trung": 0,
+    };
+    
+    // Key để lưu trữ trong Local Storage
+    const STORAGE_KEY = 'splitwiseContributionsData';
+    // Đơn vị gốc là VNĐ, nhưng ta sẽ nhập/hiển thị đơn vị là Nghìn đồng (k)
+    const K_UNIT = 1000;
+
+    // --- CÁC HÀM XỬ LÝ LƯU TRỮ (LOCAL STORAGE) ---
+
+    function saveContributions() {
+        // Lưu trữ đối tượng contributions hiện tại vào trình duyệt
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(contributions));
+    }
+
+    function loadContributions() {
+        const savedData = localStorage.getItem(STORAGE_KEY);
+        if (savedData) {
+            const loadedContributions = JSON.parse(savedData);
+            // Cập nhật contributions, đảm bảo chỉ giữ lại key của MEMBER_NAMES
+            MEMBER_NAMES.forEach(name => {
+                contributions[name] = loadedContributions[name] || 0;
+            });
+        }
+    }
+
+    // --- CÁC HÀM TIỆN ÍCH ---
+
+    function formatCurrency(amount) {
+        // Định dạng số dư thành "+10k" hoặc "-10k" (đơn vị nghìn)
+        const sign = amount >= 0 ? '+' : ''; // Giữ dấu '+' cho số dư
+        const absAmount = Math.abs(amount / K_UNIT); // Chia cho 1000 để lấy đơn vị k
+        const formatted = new Intl.NumberFormat('vi-VN').format(Math.round(absAmount));
+        return `${sign}${formatted}k`; 
+    }
+    
+    function formatTotal(amount) {
+        // Định dạng tiền tệ tổng (VNĐ đầy đủ)
+        return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(Math.round(amount));
+    }
+    
+    function formatContributionTotal(amount) {
+        // Định dạng tổng đóng góp (Đơn vị k)
+        return `${new Intl.NumberFormat('vi-VN').format(Math.round(amount / K_UNIT))}k`;
+    }
+
+    // --- LOGIC TÍNH TOÁN VÀ CẬP NHẬT (Core Logic) ---
+
+    function calculateAndUpdate() {
+        const N = MEMBER_NAMES.length;
+        
+        // 1. Tính Tổng Chi tiêu
+        let totalSpent = 0;
+        for (const name in contributions) {
+            totalSpent += contributions[name];
+            
+            // Cập nhật hiển thị tổng đóng góp
+            const totalElement = document.getElementById(`total-${name.replace(/\s/g, '-')}`);
+            if (totalElement) {
+                totalElement.textContent = formatContributionTotal(contributions[name]);
+            }
+        }
+
+        // 2. Tính Mức Chia Đều (Fair Share)
+        const fairShare = N > 0 ? totalSpent / N : 0;
+        
+        // 3. Cập nhật bảng tổng kết
+        document.getElementById('totalSpent').textContent = formatTotal(totalSpent);
+        document.getElementById('fairShare').textContent = formatTotal(fairShare);
+
+        // 4. Tính Số Dư Cuối Cùng và cập nhật từng dòng
+        MEMBER_NAMES.forEach(name => {
+            const balance = contributions[name] - fairShare;
+            const balanceElement = document.getElementById(`balance-${name.replace(/\s/g, '-')}`);
+            
+            if (balanceElement) {
+                balanceElement.textContent = formatCurrency(balance);
+                
+                // Cập nhật màu sắc (sử dụng ngưỡng 10 VNĐ để tránh sai số nhỏ)
+                balanceElement.className = 'balance-status';
+                if (balance > 10) { 
+                    balanceElement.classList.add('positive'); // Dư, được nhận lại
+                    balanceElement.textContent = formatCurrency(balance);
+                } else if (balance < -10) { 
+                    balanceElement.classList.add('negative'); // Thiếu, phải trả thêm
+                    balanceElement.textContent = formatCurrency(balance);
+                } else {
+                    balanceElement.classList.add('neutral'); // Cân bằng
+                    balanceElement.textContent = '+0k'; 
+                }
+            }
+        });
+        
+        // --- LƯU TRỮ DỮ LIỆU SAU KHI TÍNH TOÁN ---
+        saveContributions(); 
+    }
+    
+    // --- CÁC HÀM XỬ LÝ TƯƠNG TÁC (Thêm tiền) ---
+
+    function addContribution(name) {
+        const inputElement = document.getElementById(`input-${name.replace(/\s/g, '-')}`);
+        const amount = parseFloat(inputElement.value) * K_UNIT || 0; // Nhân với 1000 (k)
+        
+        if (amount > 0) {
+            contributions[name] += amount;
+            inputElement.value = ''; // Xóa input sau khi thêm
+            calculateAndUpdate();
+        } else if (amount < 0) {
+             alert("Vui lòng nhập số tiền chi tiêu dương.");
+             inputElement.value = '';
+        }
+    }
+
+    // --- CÁC HÀM XỬ LÝ GIAO DIỆN VÀ KHỞI TẠO ---
+
+    function renderTable() {
+        const tbody = document.getElementById('contributionTableBody');
+        tbody.innerHTML = '';
+        
+        MEMBER_NAMES.forEach(name => {
+            const row = document.createElement('tr');
+            const safeName = name.replace(/\s/g, '-'); 
+            
+            row.innerHTML = `
+                <td>${name}</td>
+                <td>
+                    <span class="contribution-total" id="total-${safeName}">${formatContributionTotal(contributions[name])}</span>
+                </td>
+                <td>
+                    <div class="add-expense-cell">
+                        <input 
+                            type="number" 
+                            min="0" 
+                            id="input-${safeName}"
+                            placeholder="Số k"
+                            onkeypress="if(event.key === 'Enter') { addContribution('${name}'); }"
+                        >
+                        <button class="add-button" onclick="addContribution('${name}')">Thêm</button>
+                    </div>
+                </td>
+                <td>
+                    <span id="balance-${safeName}" class="balance-status neutral">+0k</span>
+                </td>
+            `;
+            tbody.appendChild(row);
+        });
+        
+        calculateAndUpdate(); 
+    }
+    
+    function resetContributions() {
+        if (confirm("Bạn có chắc chắn muốn xóa tất cả số tiền đã đóng góp không? Dữ liệu sẽ không thể phục hồi.")) {
+            MEMBER_NAMES.forEach(name => {
+                contributions[name] = 0;
+                // Đặt lại input thêm chi tiêu về trống
+                const inputElement = document.getElementById(`input-${name.replace(/\s/g, '-')}`);
+                if (inputElement) {
+                    inputElement.value = '';
+                }
+            });
+            // Xóa dữ liệu khỏi Local Storage
+            localStorage.removeItem(STORAGE_KEY);
+            calculateAndUpdate();
+        }
+    }
+
+    // Khởi tạo: Tải dữ liệu đã lưu, sau đó vẽ bảng khi trang được tải
+    document.addEventListener('DOMContentLoaded', () => {
+        loadContributions();
+        renderTable();
+    });
+</script>
+</body>
+</html>
