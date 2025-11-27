@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chia Tiền Chi Tiêu (Đồng Bộ)</title>
+    <title>Chia Tiền Chi Tiêu (Đồng Bộ & Kiểm Soát Người Tham Gia)</title>
     
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
@@ -110,6 +110,15 @@
         .reset-button:hover {
             background-color: #c82333;
         }
+        /* Style cho Checkbox */
+        #attendanceControl {
+            margin-bottom: 20px; 
+            text-align: center; 
+            border: 1px dashed #007bff; 
+            padding: 10px; 
+            border-radius: 5px;
+            background-color: #f0f8ff;
+        }
     </style>
 </head>
 <body>
@@ -117,6 +126,12 @@
 <div class="container">
     <h2>Nhập Tiền Vào Để Tính</h2>
     
+    <div id="attendanceControl">
+        <label for="isFiveMembers">
+            <input type="checkbox" id="isFiveMembers" onchange="calculateAndUpdate()" checked> 
+            Tuần này **Tất cả 5 AE** đều ăn. (Bỏ tích nếu có người vắng, chỉ chia 4)
+        </label>
+    </div>
     <div class="summary">
         <p><strong>Tổng Chi Tiêu:</strong> <span id="totalSpent">0 VNĐ</span></p>
         <p><strong>Mức Chia Đều:</strong> <span id="fairShare">0 VNĐ</span></p>
@@ -139,7 +154,7 @@
 </div>
 
 <script>
-    // --- KHỞI TẠO FIREBASE ---
+    // --- KHỞI TẠO FIREBASE (Sử dụng cấu hình của bạn) ---
     const firebaseConfig = {
         apiKey: "AIzaSyAmoKeG8CUMldomehgVG_hGA8Gn7mb2iwA",
         authDomain: "chia-tien-57805.firebaseapp.com",
@@ -151,11 +166,8 @@
         measurementId: "G-EC2WNHLXF0"
     };
     
-    // Khởi tạo ứng dụng Firebase
     firebase.initializeApp(firebaseConfig);
-
-    // Tham chiếu đến node dữ liệu trong Realtime Database
-    const dbRef = firebase.database().ref('contributions'); // LƯU Ý: Phải thiết lập RULES cho node 'contributions'
+    const dbRef = firebase.database().ref('contributions'); 
 
     // 1. Cấu trúc dữ liệu cố định
     const MEMBER_NAMES = ["Duy", "Vanh", "Sơn", "Heo Pepi", "Trung"];
@@ -167,69 +179,26 @@
         "Trung": 0,
     };
     
+    let isFiveMembers = true; // Biến kiểm soát trạng thái checkbox
     const K_UNIT = 1000;
-
-    // --- CÁC HÀM XỬ LÝ LƯU TRỮ (FIREBASE) ---
-
-    function saveContributions() {
-        // Ghi dữ liệu lên Realtime Database
-        dbRef.set(contributions)
-            .then(() => {
-                console.log("Dữ liệu đã được lưu và đồng bộ lên Firebase.");
-            })
-            .catch((error) => {
-                console.error("Lỗi khi lưu dữ liệu lên Firebase: ", error);
-                // Báo lỗi nếu không lưu được
-            });
-    }
-
-    function loadContributions() {
-        // Đọc dữ liệu một lần từ Realtime Database
-        dbRef.once('value', (snapshot) => {
-            if (snapshot.exists()) {
-                const loadedData = snapshot.val();
-                console.log("Dữ liệu đã được tải từ Firebase:", loadedData);
-                
-                // Cập nhật contributions từ dữ liệu tải về
-                MEMBER_NAMES.forEach(name => {
-                    contributions[name] = loadedData[name] || 0;
-                });
-            } else {
-                // Nếu chưa có dữ liệu trên Firebase, lưu cấu trúc mặc định
-                saveContributions();
-            }
-            // Sau khi tải (hoặc tạo) xong, vẽ bảng
-            renderTable();
-        }, (error) => {
-            console.error("Lỗi khi tải dữ liệu từ Firebase: ", error);
-            // Vẫn vẽ bảng với dữ liệu mặc định (toàn 0) nếu có lỗi kết nối
-            renderTable(); 
-        });
-    }
-
-    // --- CÁC HÀM TIỆN ÍCH (Giữ nguyên) ---
 
     // --- CÁC HÀM TIỆN ÍCH ---
 
-function formatCurrency(amount) {
-    // Định dạng số dư thành "+10k" hoặc "-10k" (đơn vị nghìn)
-    
-    // Nếu số âm, sign là '-'
-    // Nếu số dương hoặc bằng 0, sign là '' (rỗng)
-    const sign = amount < 0 ? '-' : ''; 
-    
-    const absAmount = Math.abs(amount / K_UNIT); // Luôn lấy giá trị tuyệt đối
-    const formatted = new Intl.NumberFormat('vi-VN').format(Math.round(absAmount));
-    
-    // Trả về "+0k" nếu gần 0 để chỉ sự cân bằng
-    if (Math.abs(amount) < 10) { 
-        return '+0k';
+    function formatCurrency(amount) {
+        // Nếu số âm, sign là '-' (đã sửa lỗi dấu trừ)
+        const sign = amount < 0 ? '-' : ''; 
+        
+        const absAmount = Math.abs(amount / K_UNIT);
+        const formatted = new Intl.NumberFormat('vi-VN').format(Math.round(absAmount));
+        
+        // Trả về "+0k" nếu gần 0 để chỉ sự cân bằng
+        if (Math.abs(amount) < 10) { 
+            return '+0k';
+        }
+
+        return `${sign}${formatted}k`; 
     }
-
-    return `${sign}${formatted}k`; 
-}
-
-// ... các hàm khác giữ nguyên ...
+    
     function formatTotal(amount) {
         return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(Math.round(amount));
     }
@@ -238,11 +207,67 @@ function formatCurrency(amount) {
         return `${new Intl.NumberFormat('vi-VN').format(Math.round(amount / K_UNIT))}k`;
     }
 
+    // --- CÁC HÀM XỬ LÝ LƯU TRỮ (FIREBASE) ---
+
+    function saveContributions() {
+        // Lưu cả contributions và trạng thái checkbox
+        const dataToSave = {
+            contributions: contributions,
+            isFiveMembers: isFiveMembers 
+        };
+        
+        dbRef.set(dataToSave)
+            .then(() => {
+                console.log("Dữ liệu và trạng thái checkbox đã được lưu.");
+            })
+            .catch((error) => {
+                console.error("Lỗi khi lưu dữ liệu lên Firebase: ", error);
+            });
+    }
+
+    function loadContributions() {
+        dbRef.once('value', (snapshot) => {
+            if (snapshot.exists()) {
+                const loadedData = snapshot.val();
+                
+                // 1. Tải contributions
+                const loadedContributions = loadedData.contributions || {};
+                MEMBER_NAMES.forEach(name => {
+                    contributions[name] = loadedContributions[name] || 0;
+                });
+                
+                // 2. Tải trạng thái checkbox
+                isFiveMembers = loadedData.isFiveMembers !== undefined ? loadedData.isFiveMembers : true;
+                
+                // Cập nhật giao diện checkbox
+                const checkboxElement = document.getElementById('isFiveMembers');
+                if (checkboxElement) {
+                    checkboxElement.checked = isFiveMembers;
+                }
+
+            } else {
+                saveContributions(); // Lưu cấu trúc mặc định nếu chưa có dữ liệu
+            }
+            
+            renderTable();
+        }, (error) => {
+            console.error("Lỗi khi tải dữ liệu từ Firebase: ", error);
+            renderTable(); 
+        });
+    }
+
     // --- LOGIC TÍNH TOÁN VÀ CẬP NHẬT ---
 
     function calculateAndUpdate() {
-        const N = MEMBER_NAMES.length;
+        // Đọc trạng thái mới nhất của checkbox
+        const checkboxElement = document.getElementById('isFiveMembers');
+        isFiveMembers = checkboxElement ? checkboxElement.checked : true;
         
+        // 1. Xác định số lượng người chia (N)
+        const N_Total = MEMBER_NAMES.length; // Luôn là 5
+        const N = isFiveMembers ? N_Total : N_Total - 1; // Chia 5 nếu tích, chia 4 nếu bỏ tích
+        
+        // 2. Tính Tổng Chi tiêu
         let totalSpent = 0;
         for (const name in contributions) {
             totalSpent += contributions[name];
@@ -253,35 +278,38 @@ function formatCurrency(amount) {
             }
         }
 
+        // 3. Tính Mức Chia Đều (Fair Share)
         const fairShare = N > 0 ? totalSpent / N : 0;
         
+        // 4. Cập nhật bảng tổng kết
         document.getElementById('totalSpent').textContent = formatTotal(totalSpent);
         document.getElementById('fairShare').textContent = formatTotal(fairShare);
 
+        // 5. Tính Số Dư Cuối Cùng và cập nhật từng dòng
         MEMBER_NAMES.forEach(name => {
             const balance = contributions[name] - fairShare;
             const balanceElement = document.getElementById(`balance-${name.replace(/\s/g, '-')}`);
             
             if (balanceElement) {
                 balanceElement.className = 'balance-status';
-                if (balance > 10) { 
-                    balanceElement.classList.add('positive');
+                
+                if (totalSpent > 0 && balance > 10) { 
+                    balanceElement.classList.add('positive'); 
                     balanceElement.textContent = formatCurrency(balance);
-                } else if (balance < -10) { 
-                    balanceElement.classList.add('negative');
-                    balanceElement.textContent = formatCurrency(balance);
+                } else if (totalSpent > 0 && balance < -10) { 
+                    balanceElement.classList.add('negative'); 
+                    balanceElement.textContent = formatCurrency(balance); // Có dấu trừ
                 } else {
-                    balanceElement.classList.add('neutral');
+                    balanceElement.classList.add('neutral'); 
                     balanceElement.textContent = '+0k'; 
                 }
             }
         });
         
-        // --- LƯU TRỮ DỮ LIỆU SAU KHI TÍNH TOÁN ---
         saveContributions(); 
     }
     
-    // --- CÁC HÀM XỬ LÝ TƯƠNG TÁC (Thêm tiền) ---
+    // --- CÁC HÀM XỬ LÝ TƯƠNG TÁC (Giữ nguyên) ---
 
     function addContribution(name) {
         const inputElement = document.getElementById(`input-${name.replace(/\s/g, '-')}`);
@@ -344,11 +372,21 @@ function formatCurrency(amount) {
                 }
             });
             
-            // Xóa dữ liệu trên Firebase bằng cách ghi lại object contributions rỗng
-            dbRef.set(contributions)
+            // Reset trạng thái checkbox về mặc định (có ăn)
+            isFiveMembers = true; 
+            const checkboxElement = document.getElementById('isFiveMembers');
+            if (checkboxElement) {
+                checkboxElement.checked = true;
+            }
+
+            // Ghi lại object rỗng/mặc định lên Firebase
+            dbRef.set({
+                contributions: contributions,
+                isFiveMembers: isFiveMembers
+            })
                 .then(() => {
                     console.log("Dữ liệu đã được xóa khỏi Firebase.");
-                    calculateAndUpdate(); // Cập nhật lại giao diện
+                    calculateAndUpdate();
                 })
                 .catch((error) => {
                     console.error("Lỗi khi xóa dữ liệu Firebase: ", error);
