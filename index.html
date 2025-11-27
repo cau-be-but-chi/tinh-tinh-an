@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chia Tiền Chi Tiêu (Đồng Bộ & Kiểm Soát Người Tham Gia)</title>
+    <title>Chia Tiền Chi Tiêu (Tùy Chọn Từng Người)</title>
     
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
@@ -43,7 +43,7 @@
             color: white;
             font-weight: bold;
         }
-        td:nth-child(1) {
+        td:nth-child(2) { /* Cột Tên (Name) */
             text-align: left;
             font-weight: bold;
         }
@@ -85,15 +85,15 @@
             border-left: 5px solid #007bff;
         }
         .positive {
-            color: #28a745; /* Được nhận (dư) */
+            color: #28a745;
             font-weight: bold;
         }
         .negative {
-            color: #dc3545; /* Phải trả (nợ) */
+            color: #dc3545;
             font-weight: bold;
         }
         .neutral {
-            color: #6c757d; /* Cân bằng */
+            color: #6c757d;
             font-weight: bold;
         }
         .reset-button {
@@ -110,14 +110,9 @@
         .reset-button:hover {
             background-color: #c82333;
         }
-        /* Style cho Checkbox */
-        #attendanceControl {
-            margin-bottom: 20px; 
-            text-align: center; 
-            border: 1px dashed #007bff; 
-            padding: 10px; 
-            border-radius: 5px;
-            background-color: #f0f8ff;
+        /* Style cho Checkbox tham gia */
+        .participation-checkbox {
+            transform: scale(1.5); /* Phóng to checkbox */
         }
     </style>
 </head>
@@ -126,12 +121,6 @@
 <div class="container">
     <h2>Nhập Tiền Vào Để Tính</h2>
     
-    <div id="attendanceControl">
-        <label for="isFiveMembers">
-            <input type="checkbox" id="isFiveMembers" onchange="calculateAndUpdate()" checked> 
-            Tuần này **Tất cả 5 AE** đều ăn. (Bỏ tích nếu có người vắng, chỉ chia 4)
-        </label>
-    </div>
     <div class="summary">
         <p><strong>Tổng Chi Tiêu:</strong> <span id="totalSpent">0 VNĐ</span></p>
         <p><strong>Mức Chia Đều:</strong> <span id="fairShare">0 VNĐ</span></p>
@@ -140,7 +129,7 @@
     <table>
         <thead>
             <tr>
-                <th>Tên</th>
+                <th>Tham gia</th> <th>Tên</th>
                 <th>Tiền Đóng</th>
                 <th>Nhập tiền vào</th>
                 <th>Sau Tính Toán</th>
@@ -179,23 +168,27 @@
         "Trung": 0,
     };
     
-    let isFiveMembers = true; // Biến kiểm soát trạng thái checkbox
+    // ĐỐI TƯỢNG MỚI: Theo dõi trạng thái tham gia của từng người
+    let participation = {
+        "Duy": true,
+        "Vanh": true,
+        "Sơn": true,
+        "Heo Pepi": true,
+        "Trung": true,
+    };
+
     const K_UNIT = 1000;
 
     // --- CÁC HÀM TIỆN ÍCH ---
 
     function formatCurrency(amount) {
-        // Nếu số âm, sign là '-' (đã sửa lỗi dấu trừ)
         const sign = amount < 0 ? '-' : ''; 
-        
         const absAmount = Math.abs(amount / K_UNIT);
         const formatted = new Intl.NumberFormat('vi-VN').format(Math.round(absAmount));
         
-        // Trả về "+0k" nếu gần 0 để chỉ sự cân bằng
         if (Math.abs(amount) < 10) { 
             return '+0k';
         }
-
         return `${sign}${formatted}k`; 
     }
     
@@ -210,19 +203,13 @@
     // --- CÁC HÀM XỬ LÝ LƯU TRỮ (FIREBASE) ---
 
     function saveContributions() {
-        // Lưu cả contributions và trạng thái checkbox
+        // Lưu cả contributions và trạng thái tham gia (participation)
         const dataToSave = {
             contributions: contributions,
-            isFiveMembers: isFiveMembers 
+            participation: participation 
         };
         
-        dbRef.set(dataToSave)
-            .then(() => {
-                console.log("Dữ liệu và trạng thái checkbox đã được lưu.");
-            })
-            .catch((error) => {
-                console.error("Lỗi khi lưu dữ liệu lên Firebase: ", error);
-            });
+        dbRef.set(dataToSave); // Không cần then/catch chi tiết ở đây, chỉ cần đảm bảo lưu
     }
 
     function loadContributions() {
@@ -236,14 +223,11 @@
                     contributions[name] = loadedContributions[name] || 0;
                 });
                 
-                // 2. Tải trạng thái checkbox
-                isFiveMembers = loadedData.isFiveMembers !== undefined ? loadedData.isFiveMembers : true;
-                
-                // Cập nhật giao diện checkbox
-                const checkboxElement = document.getElementById('isFiveMembers');
-                if (checkboxElement) {
-                    checkboxElement.checked = isFiveMembers;
-                }
+                // 2. Tải trạng thái tham gia
+                const loadedParticipation = loadedData.participation || {};
+                MEMBER_NAMES.forEach(name => {
+                    participation[name] = loadedParticipation[name] !== undefined ? loadedParticipation[name] : true;
+                });
 
             } else {
                 saveContributions(); // Lưu cấu trúc mặc định nếu chưa có dữ liệu
@@ -259,14 +243,14 @@
     // --- LOGIC TÍNH TOÁN VÀ CẬP NHẬT ---
 
     function calculateAndUpdate() {
-        // Đọc trạng thái mới nhất của checkbox
-        const checkboxElement = document.getElementById('isFiveMembers');
-        isFiveMembers = checkboxElement ? checkboxElement.checked : true;
-        
-        // 1. Xác định số lượng người chia (N)
-        const N_Total = MEMBER_NAMES.length; // Luôn là 5
-        const N = isFiveMembers ? N_Total : N_Total - 1; // Chia 5 nếu tích, chia 4 nếu bỏ tích
-        
+        // 1. Tính số lượng người tham gia thực tế (N)
+        let N = 0;
+        MEMBER_NAMES.forEach(name => {
+            if (participation[name]) {
+                N++;
+            }
+        });
+
         // 2. Tính Tổng Chi tiêu
         let totalSpent = 0;
         for (const name in contributions) {
@@ -287,21 +271,32 @@
 
         // 5. Tính Số Dư Cuối Cùng và cập nhật từng dòng
         MEMBER_NAMES.forEach(name => {
-            const balance = contributions[name] - fairShare;
             const balanceElement = document.getElementById(`balance-${name.replace(/\s/g, '-')}`);
             
             if (balanceElement) {
                 balanceElement.className = 'balance-status';
                 
-                if (totalSpent > 0 && balance > 10) { 
-                    balanceElement.classList.add('positive'); 
-                    balanceElement.textContent = formatCurrency(balance);
-                } else if (totalSpent > 0 && balance < -10) { 
-                    balanceElement.classList.add('negative'); 
-                    balanceElement.textContent = formatCurrency(balance); // Có dấu trừ
+                // Chỉ tính toán số dư nếu người đó CÓ THAM GIA
+                if (participation[name]) {
+                    const balance = contributions[name] - fairShare;
+
+                    if (totalSpent > 0 && balance > 10) { 
+                        balanceElement.classList.add('positive'); 
+                        balanceElement.textContent = formatCurrency(balance);
+                    } else if (totalSpent > 0 && balance < -10) { 
+                        balanceElement.classList.add('negative'); 
+                        balanceElement.textContent = formatCurrency(balance);
+                    } else {
+                        balanceElement.classList.add('neutral'); 
+                        balanceElement.textContent = '+0k'; 
+                    }
                 } else {
+                    // Nếu không tham gia, số dư luôn là 0 (hoặc tiền đã đóng góp)
                     balanceElement.classList.add('neutral'); 
-                    balanceElement.textContent = '+0k'; 
+                    balanceElement.textContent = formatContributionTotal(contributions[name]); // Hiện tiền đã đóng nếu có
+                    if (contributions[name] === 0) {
+                        balanceElement.textContent = '-'; // Hoặc dấu gạch ngang nếu không có tiền đóng
+                    }
                 }
             }
         });
@@ -309,7 +304,14 @@
         saveContributions(); 
     }
     
-    // --- CÁC HÀM XỬ LÝ TƯƠNG TÁC (Giữ nguyên) ---
+    // --- HÀM XỬ LÝ SỰ KIỆN THAY ĐỔI CHECKBOX MỚI ---
+    function toggleParticipation(name) {
+        const checkbox = document.getElementById(`participate-${name.replace(/\s/g, '-')}`);
+        participation[name] = checkbox.checked; // Cập nhật trạng thái
+        calculateAndUpdate(); // Tính toán lại
+    }
+
+    // --- CÁC HÀM XỬ LÝ TƯƠNG TÁC (Thêm tiền) ---
 
     function addContribution(name) {
         const inputElement = document.getElementById(`input-${name.replace(/\s/g, '-')}`);
@@ -335,7 +337,17 @@
             const row = document.createElement('tr');
             const safeName = name.replace(/\s/g, '-'); 
             
+            // Xây dựng hàng với CỘT CHECKBOX MỚI
             row.innerHTML = `
+                <td>
+                    <input 
+                        type="checkbox" 
+                        class="participation-checkbox"
+                        id="participate-${safeName}" 
+                        ${participation[name] ? 'checked' : ''}
+                        onchange="toggleParticipation('${name}')"
+                    >
+                </td>
                 <td>${name}</td>
                 <td>
                     <span class="contribution-total" id="total-${safeName}">${formatContributionTotal(contributions[name])}</span>
@@ -366,27 +378,21 @@
         if (confirm("Bạn có chắc chắn muốn xóa tất cả số tiền đã đóng góp không? Dữ liệu sẽ bị xóa khỏi tất cả thiết bị.")) {
             MEMBER_NAMES.forEach(name => {
                 contributions[name] = 0;
+                participation[name] = true; // Reset trạng thái tham gia
                 const inputElement = document.getElementById(`input-${name.replace(/\s/g, '-')}`);
                 if (inputElement) {
                     inputElement.value = '';
                 }
             });
             
-            // Reset trạng thái checkbox về mặc định (có ăn)
-            isFiveMembers = true; 
-            const checkboxElement = document.getElementById('isFiveMembers');
-            if (checkboxElement) {
-                checkboxElement.checked = true;
-            }
-
             // Ghi lại object rỗng/mặc định lên Firebase
             dbRef.set({
                 contributions: contributions,
-                isFiveMembers: isFiveMembers
+                participation: participation
             })
                 .then(() => {
                     console.log("Dữ liệu đã được xóa khỏi Firebase.");
-                    calculateAndUpdate();
+                    renderTable(); // Vẽ lại bảng để cập nhật trạng thái tham gia
                 })
                 .catch((error) => {
                     console.error("Lỗi khi xóa dữ liệu Firebase: ", error);
