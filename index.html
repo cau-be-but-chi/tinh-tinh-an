@@ -3,7 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chia Tiền Chi Tiêu</title>
+    <title>Chia Tiền Chi Tiêu (Đồng Bộ)</title>
+    
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -43,13 +47,11 @@
             text-align: left;
             font-weight: bold;
         }
-        /* Style cho cột Tiền Đóng Góp hiện tại */
         .contribution-total {
             font-size: 1.1em;
             font-weight: bold;
             color: #28a745;
         }
-        /* Style cho cột Thêm Chi Tiêu */
         .add-expense-cell {
             display: flex;
             gap: 5px;
@@ -75,7 +77,6 @@
         .add-button:hover {
             background-color: #1e7e34;
         }
-        
         .summary {
             margin-top: 20px;
             padding: 15px;
@@ -138,7 +139,25 @@
 </div>
 
 <script>
-    // 1. Cấu trúc dữ liệu cố định (Không nên thay đổi thứ tự các tên trong mảng này)
+    // --- KHỞI TẠO FIREBASE ---
+    const firebaseConfig = {
+        apiKey: "AIzaSyAmoKeG8CUMldomehgVG_hGA8Gn7mb2iwA",
+        authDomain: "chia-tien-57805.firebaseapp.com",
+        databaseURL: "https://chia-tien-57805-default-rtdb.firebaseio.com",
+        projectId: "chia-tien-57805",
+        storageBucket: "chia-tien-57805.firebasestorage.app",
+        messagingSenderId: "204223753606",
+        appId: "1:204223753606:web:516c63a18a9d0894779007",
+        measurementId: "G-EC2WNHLXF0"
+    };
+    
+    // Khởi tạo ứng dụng Firebase
+    firebase.initializeApp(firebaseConfig);
+
+    // Tham chiếu đến node dữ liệu trong Realtime Database
+    const dbRef = firebase.database().ref('contributions'); // LƯU Ý: Phải thiết lập RULES cho node 'contributions'
+
+    // 1. Cấu trúc dữ liệu cố định
     const MEMBER_NAMES = ["Duy", "Vanh", "Sơn", "Heo Pepi", "Trung"];
     let contributions = {
         "Duy": 0,
@@ -148,91 +167,111 @@
         "Trung": 0,
     };
     
-    // Key để lưu trữ trong Local Storage
-    const STORAGE_KEY = 'splitwiseContributionsData';
-    // Đơn vị gốc là VNĐ, nhưng ta sẽ nhập/hiển thị đơn vị là Nghìn đồng (k)
     const K_UNIT = 1000;
 
-    // --- CÁC HÀM XỬ LÝ LƯU TRỮ (LOCAL STORAGE) ---
+    // --- CÁC HÀM XỬ LÝ LƯU TRỮ (FIREBASE) ---
 
     function saveContributions() {
-        // Lưu trữ đối tượng contributions hiện tại vào trình duyệt
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(contributions));
+        // Ghi dữ liệu lên Realtime Database
+        dbRef.set(contributions)
+            .then(() => {
+                console.log("Dữ liệu đã được lưu và đồng bộ lên Firebase.");
+            })
+            .catch((error) => {
+                console.error("Lỗi khi lưu dữ liệu lên Firebase: ", error);
+                // Báo lỗi nếu không lưu được
+            });
     }
 
     function loadContributions() {
-        const savedData = localStorage.getItem(STORAGE_KEY);
-        if (savedData) {
-            const loadedContributions = JSON.parse(savedData);
-            // Cập nhật contributions, đảm bảo chỉ giữ lại key của MEMBER_NAMES
-            MEMBER_NAMES.forEach(name => {
-                contributions[name] = loadedContributions[name] || 0;
-            });
-        }
+        // Đọc dữ liệu một lần từ Realtime Database
+        dbRef.once('value', (snapshot) => {
+            if (snapshot.exists()) {
+                const loadedData = snapshot.val();
+                console.log("Dữ liệu đã được tải từ Firebase:", loadedData);
+                
+                // Cập nhật contributions từ dữ liệu tải về
+                MEMBER_NAMES.forEach(name => {
+                    contributions[name] = loadedData[name] || 0;
+                });
+            } else {
+                // Nếu chưa có dữ liệu trên Firebase, lưu cấu trúc mặc định
+                saveContributions();
+            }
+            // Sau khi tải (hoặc tạo) xong, vẽ bảng
+            renderTable();
+        }, (error) => {
+            console.error("Lỗi khi tải dữ liệu từ Firebase: ", error);
+            // Vẫn vẽ bảng với dữ liệu mặc định (toàn 0) nếu có lỗi kết nối
+            renderTable(); 
+        });
     }
+
+    // --- CÁC HÀM TIỆN ÍCH (Giữ nguyên) ---
 
     // --- CÁC HÀM TIỆN ÍCH ---
 
-    function formatCurrency(amount) {
-        // Định dạng số dư thành "+10k" hoặc "-10k" (đơn vị nghìn)
-        const sign = amount >= 0 ? '+' : ''; // Giữ dấu '+' cho số dư
-        const absAmount = Math.abs(amount / K_UNIT); // Chia cho 1000 để lấy đơn vị k
-        const formatted = new Intl.NumberFormat('vi-VN').format(Math.round(absAmount));
-        return `${sign}${formatted}k`; 
-    }
+function formatCurrency(amount) {
+    // Định dạng số dư thành "+10k" hoặc "-10k" (đơn vị nghìn)
     
+    // Nếu số âm, sign là '-'
+    // Nếu số dương hoặc bằng 0, sign là '' (rỗng)
+    const sign = amount < 0 ? '-' : ''; 
+    
+    const absAmount = Math.abs(amount / K_UNIT); // Luôn lấy giá trị tuyệt đối
+    const formatted = new Intl.NumberFormat('vi-VN').format(Math.round(absAmount));
+    
+    // Trả về "+0k" nếu gần 0 để chỉ sự cân bằng
+    if (Math.abs(amount) < 10) { 
+        return '+0k';
+    }
+
+    return `${sign}${formatted}k`; 
+}
+
+// ... các hàm khác giữ nguyên ...
     function formatTotal(amount) {
-        // Định dạng tiền tệ tổng (VNĐ đầy đủ)
         return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(Math.round(amount));
     }
     
     function formatContributionTotal(amount) {
-        // Định dạng tổng đóng góp (Đơn vị k)
         return `${new Intl.NumberFormat('vi-VN').format(Math.round(amount / K_UNIT))}k`;
     }
 
-    // --- LOGIC TÍNH TOÁN VÀ CẬP NHẬT (Core Logic) ---
+    // --- LOGIC TÍNH TOÁN VÀ CẬP NHẬT ---
 
     function calculateAndUpdate() {
         const N = MEMBER_NAMES.length;
         
-        // 1. Tính Tổng Chi tiêu
         let totalSpent = 0;
         for (const name in contributions) {
             totalSpent += contributions[name];
             
-            // Cập nhật hiển thị tổng đóng góp
             const totalElement = document.getElementById(`total-${name.replace(/\s/g, '-')}`);
             if (totalElement) {
                 totalElement.textContent = formatContributionTotal(contributions[name]);
             }
         }
 
-        // 2. Tính Mức Chia Đều (Fair Share)
         const fairShare = N > 0 ? totalSpent / N : 0;
         
-        // 3. Cập nhật bảng tổng kết
         document.getElementById('totalSpent').textContent = formatTotal(totalSpent);
         document.getElementById('fairShare').textContent = formatTotal(fairShare);
 
-        // 4. Tính Số Dư Cuối Cùng và cập nhật từng dòng
         MEMBER_NAMES.forEach(name => {
             const balance = contributions[name] - fairShare;
             const balanceElement = document.getElementById(`balance-${name.replace(/\s/g, '-')}`);
             
             if (balanceElement) {
-                balanceElement.textContent = formatCurrency(balance);
-                
-                // Cập nhật màu sắc (sử dụng ngưỡng 10 VNĐ để tránh sai số nhỏ)
                 balanceElement.className = 'balance-status';
                 if (balance > 10) { 
-                    balanceElement.classList.add('positive'); // Dư, được nhận lại
+                    balanceElement.classList.add('positive');
                     balanceElement.textContent = formatCurrency(balance);
                 } else if (balance < -10) { 
-                    balanceElement.classList.add('negative'); // Thiếu, phải trả thêm
+                    balanceElement.classList.add('negative');
                     balanceElement.textContent = formatCurrency(balance);
                 } else {
-                    balanceElement.classList.add('neutral'); // Cân bằng
+                    balanceElement.classList.add('neutral');
                     balanceElement.textContent = '+0k'; 
                 }
             }
@@ -246,11 +285,11 @@
 
     function addContribution(name) {
         const inputElement = document.getElementById(`input-${name.replace(/\s/g, '-')}`);
-        const amount = parseFloat(inputElement.value) * K_UNIT || 0; // Nhân với 1000 (k)
+        const amount = parseFloat(inputElement.value) * K_UNIT || 0;
         
         if (amount > 0) {
             contributions[name] += amount;
-            inputElement.value = ''; // Xóa input sau khi thêm
+            inputElement.value = '';
             calculateAndUpdate();
         } else if (amount < 0) {
              alert("Vui lòng nhập số tiền chi tiêu dương.");
@@ -296,26 +335,30 @@
     }
     
     function resetContributions() {
-        if (confirm("Bạn có chắc chắn muốn xóa tất cả số tiền đã đóng góp không? Dữ liệu sẽ không thể phục hồi.")) {
+        if (confirm("Bạn có chắc chắn muốn xóa tất cả số tiền đã đóng góp không? Dữ liệu sẽ bị xóa khỏi tất cả thiết bị.")) {
             MEMBER_NAMES.forEach(name => {
                 contributions[name] = 0;
-                // Đặt lại input thêm chi tiêu về trống
                 const inputElement = document.getElementById(`input-${name.replace(/\s/g, '-')}`);
                 if (inputElement) {
                     inputElement.value = '';
                 }
             });
-            // Xóa dữ liệu khỏi Local Storage
-            localStorage.removeItem(STORAGE_KEY);
-            calculateAndUpdate();
+            
+            // Xóa dữ liệu trên Firebase bằng cách ghi lại object contributions rỗng
+            dbRef.set(contributions)
+                .then(() => {
+                    console.log("Dữ liệu đã được xóa khỏi Firebase.");
+                    calculateAndUpdate(); // Cập nhật lại giao diện
+                })
+                .catch((error) => {
+                    console.error("Lỗi khi xóa dữ liệu Firebase: ", error);
+                    alert("Lỗi: Không thể xóa dữ liệu trên Firebase.");
+                });
         }
     }
 
-    // Khởi tạo: Tải dữ liệu đã lưu, sau đó vẽ bảng khi trang được tải
-    document.addEventListener('DOMContentLoaded', () => {
-        loadContributions();
-        renderTable();
-    });
+    // Khởi tạo: Tải dữ liệu từ Firebase khi trang được tải
+    document.addEventListener('DOMContentLoaded', loadContributions);
 </script>
 </body>
 </html>
