@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chia Tiền Chi Tiêu (Tùy Chọn Từng Người)</title>
+    <title>Chia Tiền Chi Tiêu (Tùy Chọn Từng Người & Xóa Cục Bộ)</title>
     
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
@@ -43,14 +43,37 @@
             color: white;
             font-weight: bold;
         }
-        td:nth-child(2) { /* Cột Tên (Name) */
+        td:nth-child(2) { 
             text-align: left;
             font-weight: bold;
+        }
+        /* Container mới cho Tiền đóng để chứa nút Xóa */
+        .contribution-cell {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 5px; /* Thêm khoảng cách giữa số tiền và nút */
         }
         .contribution-total {
             font-size: 1.1em;
             font-weight: bold;
             color: #28a745;
+        }
+        /* CẬP NHẬT STYLE NÚT XÓA */
+        .clear-button { 
+            background-color: #f8d7da; /* Nền đỏ nhạt */
+            color: #721c24; /* Chữ đỏ đậm */
+            border: 1px solid #f5c6cb;
+            border-radius: 4px;
+            font-size: 0.7em;
+            font-weight: bold;
+            cursor: pointer;
+            padding: 3px 6px;
+            transition: background-color 0.2s;
+            line-height: 1; /* Cố định chiều cao */
+        }
+        .clear-button:hover {
+            background-color: #f5c6cb;
         }
         .add-expense-cell {
             display: flex;
@@ -110,9 +133,8 @@
         .reset-button:hover {
             background-color: #c82333;
         }
-        /* Style cho Checkbox tham gia */
         .participation-checkbox {
-            transform: scale(1.5); /* Phóng to checkbox */
+            transform: scale(1.5);
         }
     </style>
 </head>
@@ -129,7 +151,8 @@
     <table>
         <thead>
             <tr>
-                <th>Tham gia</th> <th>Tên</th>
+                <th>Tham gia</th>
+                <th>Tên</th>
                 <th>Tiền Đóng</th>
                 <th>Nhập tiền vào</th>
                 <th>Sau Tính Toán</th>
@@ -168,7 +191,6 @@
         "Trung": 0,
     };
     
-    // ĐỐI TƯỢNG MỚI: Theo dõi trạng thái tham gia của từng người
     let participation = {
         "Duy": true,
         "Vanh": true,
@@ -203,13 +225,11 @@
     // --- CÁC HÀM XỬ LÝ LƯU TRỮ (FIREBASE) ---
 
     function saveContributions() {
-        // Lưu cả contributions và trạng thái tham gia (participation)
         const dataToSave = {
             contributions: contributions,
             participation: participation 
         };
-        
-        dbRef.set(dataToSave); // Không cần then/catch chi tiết ở đây, chỉ cần đảm bảo lưu
+        dbRef.set(dataToSave); 
     }
 
     function loadContributions() {
@@ -217,20 +237,18 @@
             if (snapshot.exists()) {
                 const loadedData = snapshot.val();
                 
-                // 1. Tải contributions
                 const loadedContributions = loadedData.contributions || {};
                 MEMBER_NAMES.forEach(name => {
                     contributions[name] = loadedContributions[name] || 0;
                 });
                 
-                // 2. Tải trạng thái tham gia
                 const loadedParticipation = loadedData.participation || {};
                 MEMBER_NAMES.forEach(name => {
                     participation[name] = loadedParticipation[name] !== undefined ? loadedParticipation[name] : true;
                 });
 
             } else {
-                saveContributions(); // Lưu cấu trúc mặc định nếu chưa có dữ liệu
+                saveContributions(); 
             }
             
             renderTable();
@@ -243,7 +261,6 @@
     // --- LOGIC TÍNH TOÁN VÀ CẬP NHẬT ---
 
     function calculateAndUpdate() {
-        // 1. Tính số lượng người tham gia thực tế (N)
         let N = 0;
         MEMBER_NAMES.forEach(name => {
             if (participation[name]) {
@@ -251,32 +268,25 @@
             }
         });
 
-        // 2. Tính Tổng Chi tiêu
         let totalSpent = 0;
         for (const name in contributions) {
             totalSpent += contributions[name];
             
-            const totalElement = document.getElementById(`total-${name.replace(/\s/g, '-')}`);
-            if (totalElement) {
-                totalElement.textContent = formatContributionTotal(contributions[name]);
-            }
+            // LƯU Ý: Không cập nhật totalElement ở đây nữa, vì nó được cập nhật trong renderTable
+            // (để nút Xóa luôn hoạt động tốt hơn)
         }
 
-        // 3. Tính Mức Chia Đều (Fair Share)
         const fairShare = N > 0 ? totalSpent / N : 0;
         
-        // 4. Cập nhật bảng tổng kết
         document.getElementById('totalSpent').textContent = formatTotal(totalSpent);
         document.getElementById('fairShare').textContent = formatTotal(fairShare);
 
-        // 5. Tính Số Dư Cuối Cùng và cập nhật từng dòng
         MEMBER_NAMES.forEach(name => {
             const balanceElement = document.getElementById(`balance-${name.replace(/\s/g, '-')}`);
             
             if (balanceElement) {
                 balanceElement.className = 'balance-status';
                 
-                // Chỉ tính toán số dư nếu người đó CÓ THAM GIA
                 if (participation[name]) {
                     const balance = contributions[name] - fairShare;
 
@@ -291,24 +301,39 @@
                         balanceElement.textContent = '+0k'; 
                     }
                 } else {
-                    // Nếu không tham gia, số dư luôn là 0 (hoặc tiền đã đóng góp)
                     balanceElement.classList.add('neutral'); 
-                    balanceElement.textContent = formatContributionTotal(contributions[name]); // Hiện tiền đã đóng nếu có
+                    balanceElement.textContent = formatContributionTotal(contributions[name]); 
                     if (contributions[name] === 0) {
-                        balanceElement.textContent = '-'; // Hoặc dấu gạch ngang nếu không có tiền đóng
+                        balanceElement.textContent = '-'; 
                     }
                 }
             }
         });
         
         saveContributions(); 
+        // Sau khi tính toán và lưu xong, gọi renderTable để cập nhật nút Xóa
+        renderTable(); 
     }
     
-    // --- HÀM XỬ LÝ SỰ KIỆN THAY ĐỔI CHECKBOX MỚI ---
+    // --- HÀM XÓA TIỀN ĐÓNG CỦA MỘT NGƯỜI ---
+    function clearContribution(name) {
+        if (confirm(`Bạn có chắc chắn muốn xóa số tiền đóng góp của ${name} (${formatContributionTotal(contributions[name])}) không?`)) {
+            contributions[name] = 0; 
+            
+            const inputElement = document.getElementById(`input-${name.replace(/\s/g, '-')}`);
+            if (inputElement) {
+                inputElement.value = '';
+            }
+            
+            calculateAndUpdate(); // Tính toán và lưu lại (sẽ gọi renderTable)
+        }
+    }
+
+    // --- HÀM XỬ LÝ SỰ KIỆN THAY ĐỔI CHECKBOX ---
     function toggleParticipation(name) {
         const checkbox = document.getElementById(`participate-${name.replace(/\s/g, '-')}`);
-        participation[name] = checkbox.checked; // Cập nhật trạng thái
-        calculateAndUpdate(); // Tính toán lại
+        participation[name] = checkbox.checked; 
+        calculateAndUpdate(); 
     }
 
     // --- CÁC HÀM XỬ LÝ TƯƠNG TÁC (Thêm tiền) ---
@@ -327,7 +352,7 @@
         }
     }
 
-    // --- CÁC HÀM XỬ LÝ GIAO DIỆN VÀ KHỞI TẠO ---
+    // --- CÁC HÀM XỬ LÝ GIAO DIỆN VÀ KHỞI TẠO (Đã sửa nút Xóa) ---
 
     function renderTable() {
         const tbody = document.getElementById('contributionTableBody');
@@ -337,7 +362,6 @@
             const row = document.createElement('tr');
             const safeName = name.replace(/\s/g, '-'); 
             
-            // Xây dựng hàng với CỘT CHECKBOX MỚI
             row.innerHTML = `
                 <td>
                     <input 
@@ -350,7 +374,10 @@
                 </td>
                 <td>${name}</td>
                 <td>
-                    <span class="contribution-total" id="total-${safeName}">${formatContributionTotal(contributions[name])}</span>
+                    <div class="contribution-cell">
+                        <span class="contribution-total" id="total-${safeName}">${formatContributionTotal(contributions[name])}</span>
+                        <button class="clear-button" onclick="clearContribution('${name}')">Xóa</button>
+                    </div>
                 </td>
                 <td>
                     <div class="add-expense-cell">
@@ -371,28 +398,28 @@
             tbody.appendChild(row);
         });
         
-        calculateAndUpdate(); 
+        // LƯU Ý: Gọi calculateAndUpdate() ở đây để cập nhật số dư, và nó sẽ gọi lại renderTable() 
+        // nhưng lần đầu tiên nó phải được gọi ở loadContributions
+        // Vì vậy, ta chỉ cần đảm bảo các phần tử đã được tạo.
     }
     
     function resetContributions() {
         if (confirm("Bạn có chắc chắn muốn xóa tất cả số tiền đã đóng góp không? Dữ liệu sẽ bị xóa khỏi tất cả thiết bị.")) {
             MEMBER_NAMES.forEach(name => {
                 contributions[name] = 0;
-                participation[name] = true; // Reset trạng thái tham gia
+                participation[name] = true; 
                 const inputElement = document.getElementById(`input-${name.replace(/\s/g, '-')}`);
                 if (inputElement) {
                     inputElement.value = '';
                 }
             });
             
-            // Ghi lại object rỗng/mặc định lên Firebase
             dbRef.set({
                 contributions: contributions,
                 participation: participation
             })
                 .then(() => {
-                    console.log("Dữ liệu đã được xóa khỏi Firebase.");
-                    renderTable(); // Vẽ lại bảng để cập nhật trạng thái tham gia
+                    calculateAndUpdate(); // Tính toán và gọi renderTable
                 })
                 .catch((error) => {
                     console.error("Lỗi khi xóa dữ liệu Firebase: ", error);
@@ -401,7 +428,6 @@
         }
     }
 
-    // Khởi tạo: Tải dữ liệu từ Firebase khi trang được tải
     document.addEventListener('DOMContentLoaded', loadContributions);
 </script>
 </body>
