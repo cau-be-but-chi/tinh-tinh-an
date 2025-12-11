@@ -1,10 +1,10 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <title>Chia Tiền</title>
-    
+
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
 
@@ -43,7 +43,7 @@
             color: white;
             font-weight: bold;
         }
-        td:nth-child(2) { 
+        td:nth-child(2) {
             text-align: left;
             font-weight: bold;
         }
@@ -51,16 +51,16 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
-            gap: 5px; 
+            gap: 5px;
         }
         .contribution-total {
             font-size: 1.1em;
             font-weight: bold;
             color: #28a745;
         }
-        .clear-button { 
-            background-color: #f8d7da; 
-            color: #721c24; 
+        .clear-button {
+            background-color: #f8d7da;
+            color: #721c24;
             border: 1px solid #f5c6cb;
             border-radius: 4px;
             font-size: 0.7em;
@@ -134,16 +134,23 @@
         .participation-checkbox {
             transform: scale(1.5);
         }
+
+        /* Responsive small screens */
+        @media (max-width: 480px) {
+            .container { padding: 10px; }
+            th, td { padding: 8px; font-size: 14px; }
+            .add-expense-cell input[type="number"] { width: 50px; }
+        }
     </style>
 </head>
 <body>
 
 <div class="container">
     <h2>Nhập Tiền Vào Để Tính</h2>
-    
+
     <div class="summary">
         <p><strong>Tổng Chi Tiêu:</strong> <span id="totalSpent">0 VNĐ</span></p>
-        <p><strong>Chia Đều:</strong> <span id="fairShare">0 VNĐ</span></p>
+        <p><strong>Chia Đều (trung bình trên tất cả thành viên):</strong> <span id="fairShare">0 VNĐ</span></p>
     </div>
 
     <table>
@@ -157,14 +164,14 @@
             </tr>
         </thead>
         <tbody id="contributionTableBody">
-            </tbody>
+        </tbody>
     </table>
-    
+
     <button class="reset-button" onclick="resetContributions()">Xóa tất cả dữ liệu đã nhập</button>
 </div>
 
 <script>
-    // --- KHỞI TẠO FIREBASE (Sử dụng cấu hình của bạn) ---
+    // --- FIREBASE CONFIG ---
     const firebaseConfig = {
         apiKey: "AIzaSyAmoKeG8CUMldomehgVG_hGA8Gn7mb2iwA",
         authDomain: "chia-tien-57805.firebaseapp.com",
@@ -175,227 +182,241 @@
         appId: "1:204223753606:web:516c63a18a9d0894779007",
         measurementId: "G-EC2WNHLXF0"
     };
-    
+
     firebase.initializeApp(firebaseConfig);
-    const dbRef = firebase.database().ref('contributions'); 
+    const dbRef = firebase.database().ref('chia-tien-app'); // node chính
 
-    // 1. Cấu trúc dữ liệu cố định
+    // --- DỮ LIỆU BAN ĐẦU ---
     const MEMBER_NAMES = ["Duy", "Vanh", "Sơn", "Heo Pepi", "Trung"];
-    let contributions = {
-        "Duy": 0,
-        "Vanh": 0,
-        "Sơn": 0,
-        "Heo Pepi": 0,
-        "Trung": 0,
-    };
-    
-    let participation = {
-        "Duy": true,
-        "Vanh": true,
-        "Sơn": true,
-        "Heo Pepi": true,
-        "Trung": true,
-    };
-
     const K_UNIT = 1000;
 
-    // --- CÁC HÀM TIỆN ÍCH ---
+    // contributions và participation sẽ được tính từ transactions
+    let contributions = {};   // tổng các khoản mỗi người đã trả (tính từ transactions)
+    let mustPay = {};         // tổng mỗi người phải trả (tính từ transactions)
+    let participation = {};   // checkbox hiện trạng (dùng để chọn participant cho transaction mới)
+    let transactions = [];    // mảng transaction: { payer, amount, participants: [...] }
 
+    // init structure
+    MEMBER_NAMES.forEach(n => {
+        contributions[n] = 0;
+        mustPay[n] = 0;
+        participation[n] = true;
+    });
+
+    // --- HỖ TRỢ HIỂN THỊ ---
     function formatCurrency(amount) {
-        const sign = amount < 0 ? '-' : ''; 
+        // amount in VND (số thực) -> hiển thị xk
+        const sign = amount < 0 ? '-' : '';
         const absAmount = Math.abs(amount / K_UNIT);
         const formatted = new Intl.NumberFormat('vi-VN').format(Math.round(absAmount));
-        
-        if (Math.abs(amount) < 10) { 
-            return '+0k';
-        }
-        return `${sign}${formatted}k`; 
+        if (Math.abs(amount) < 10) return '+0k';
+        return `${sign}${formatted}k`;
     }
-    
+
     function formatTotal(amount) {
         return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(Math.round(amount));
     }
-    
+
     function formatContributionTotal(amount) {
         return `${new Intl.NumberFormat('vi-VN').format(Math.round(amount / K_UNIT))}k`;
     }
 
-    // --- CÁC HÀM XỬ LÝ LƯU TRỮ (FIREBASE) ---
-
-    function saveContributions() {
+    // --- LƯU / TẢI DỮ LIỆU (vào firebase) ---
+    function saveData() {
         const dataToSave = {
-            contributions: contributions,
-            participation: participation 
+            participation: participation,
+            transactions: transactions
         };
-        dbRef.set(dataToSave); 
+        return dbRef.set(dataToSave);
     }
 
-    function loadContributions() {
-        dbRef.once('value', (snapshot) => {
+    function loadData() {
+        dbRef.once('value', snapshot => {
             if (snapshot.exists()) {
-                const loadedData = snapshot.val();
-                
-                const loadedContributions = loadedData.contributions || {};
-                MEMBER_NAMES.forEach(name => {
-                    contributions[name] = loadedContributions[name] || 0;
-                });
-                
-                const loadedParticipation = loadedData.participation || {};
-                MEMBER_NAMES.forEach(name => {
-                    participation[name] = loadedParticipation[name] !== undefined ? loadedParticipation[name] : true;
-                });
-
+                const data = snapshot.val();
+                participation = data.participation || participation;
+                transactions = data.transactions || [];
             } else {
-                saveContributions(); 
+                // lần đầu: lưu cấu trúc mặc định
+                saveData();
             }
-            
-            renderTable(); // Gọi renderTable LẦN ĐẦU
-            calculateAndUpdate(false); // Tính toán mà không gọi lại renderTable
-        }, (error) => {
+            // đảm bảo có key cho tất cả member
+            MEMBER_NAMES.forEach(n => {
+                if (participation[n] === undefined) participation[n] = true;
+            });
+
+            renderTable();
+            calculateAndUpdate(false);
+        }, error => {
             console.error("Lỗi khi tải dữ liệu từ Firebase: ", error);
-            renderTable(); 
+            renderTable();
             calculateAndUpdate(false);
         });
     }
 
-    // --- LOGIC TÍNH TOÁN VÀ CẬP NHẬT (Đã sửa lỗi) ---
-    function calculateAndUpdate(shouldRenderTable = true) {
-        let N = 0;
-        MEMBER_NAMES.forEach(name => {
-            if (participation[name]) {
-                N++;
-            }
+    // --- XỬ LÝ TRANSACTIONS & TÍNH TOÁN ---
+    function recalcFromTransactions() {
+        // reset
+        MEMBER_NAMES.forEach(n => {
+            contributions[n] = 0;
+            mustPay[n] = 0;
         });
 
-        let totalSpent = 0;
-        for (const name in contributions) {
-            totalSpent += contributions[name];
-            
-            // CẬP NHẬT TRỰC TIẾP Ô TIỀN ĐÓNG (FIX LỖI)
-            const totalElement = document.getElementById(`total-${name.replace(/\s/g, '-')}`);
-            if (totalElement) {
-                totalElement.textContent = formatContributionTotal(contributions[name]);
-            }
-        }
+        // contributions: tổng do mỗi payer trả
+        transactions.forEach(t => {
+            if (!contributions[t.payer]) contributions[t.payer] = 0;
+            contributions[t.payer] += t.amount;
+        });
 
-        const fairShare = N > 0 ? totalSpent / N : 0;
-        
+        // mustPay: mỗi transaction chia đều theo participants
+        transactions.forEach(t => {
+            const partCount = (t.participants && t.participants.length) || 0;
+            if (partCount === 0) return;
+            const split = t.amount / partCount;
+            t.participants.forEach(p => {
+                if (!mustPay[p]) mustPay[p] = 0;
+                mustPay[p] += split;
+            });
+        });
+    }
+
+    function calculateAndUpdate(shouldRenderTable = true) {
+        // tính lại từ transactions
+        recalcFromTransactions();
+
+        // tổng chi tiêu
+        let totalSpent = transactions.reduce((s, t) => s + (t.amount || 0), 0);
+
+        // fairShare: giữ là trung bình trên tất cả thành viên (chỉ để hiển thị)
+        const fairShare = MEMBER_NAMES.length > 0 ? totalSpent / MEMBER_NAMES.length : 0;
+
         document.getElementById('totalSpent').textContent = formatTotal(totalSpent);
         document.getElementById('fairShare').textContent = formatTotal(fairShare);
 
+        // cập nhật ô tổng đã đóng (contribution) và balance (đã đóng - phải trả)
         MEMBER_NAMES.forEach(name => {
-            const balanceElement = document.getElementById(`balance-${name.replace(/\s/g, '-')}`);
-            
-            if (balanceElement) {
-                balanceElement.className = 'balance-status';
-                
-                if (participation[name]) {
-                    const balance = contributions[name] - fairShare;
+            const safeName = name.replace(/\s/g, '-');
+            const totalEl = document.getElementById(`total-${safeName}`);
+            if (totalEl) totalEl.textContent = formatContributionTotal(contributions[name] || 0);
 
-                    if (totalSpent > 0 && balance > 10) { 
-                        balanceElement.classList.add('positive'); 
-                        balanceElement.textContent = formatCurrency(balance);
-                    } else if (totalSpent > 0 && balance < -10) { 
-                        balanceElement.classList.add('negative'); 
-                        balanceElement.textContent = formatCurrency(balance);
-                    } else {
-                        balanceElement.classList.add('neutral'); 
-                        balanceElement.textContent = '+0k'; 
-                    }
-                } else {
-                    // Nếu không tham gia, chỉ hiển thị số tiền đã đóng
-                    balanceElement.classList.add('neutral'); 
-                    balanceElement.textContent = formatContributionTotal(contributions[name]); 
-                    if (contributions[name] === 0) {
-                        balanceElement.textContent = '-'; 
-                    }
-                }
+            const balEl = document.getElementById(`balance-${safeName}`);
+            if (!balEl) return;
+            balEl.className = 'balance-status';
+            const bal = (contributions[name] || 0) - (mustPay[name] || 0);
+
+            if (Math.abs(bal) < 10) {
+                balEl.classList.add('neutral');
+                balEl.textContent = '+0k';
+            } else if (bal > 0) {
+                balEl.classList.add('positive');
+                balEl.textContent = formatCurrency(bal);
+            } else {
+                balEl.classList.add('negative');
+                balEl.textContent = formatCurrency(bal);
             }
         });
-        
-        saveContributions(); 
-        
-        // Chỉ gọi renderTable nếu cần thiết (ví dụ: sau khi xóa cục bộ)
-        if (shouldRenderTable) {
-            renderTable();
-        }
-    }
-    
-    // --- HÀM XÓA TIỀN ĐÓNG CỦA MỘT NGƯỜI ---
-    function clearContribution(name) {
-        if (confirm(`Bạn có chắc chắn muốn xóa số tiền đóng góp của ${name} (${formatContributionTotal(contributions[name])}) không?`)) {
-            contributions[name] = 0; 
-            
-            const inputElement = document.getElementById(`input-${name.replace(/\s/g, '-')}`);
-            if (inputElement) {
-                inputElement.value = '';
-            }
-            
-            // Gọi calculateAndUpdate với true để cập nhật nút Xóa trên giao diện
-            calculateAndUpdate(true); 
-        }
+
+        // lưu data
+        saveData().catch(err => console.error("Lỗi saveData:", err));
+
+        if (shouldRenderTable) renderTable();
     }
 
-    // --- HÀM XỬ LÝ SỰ KIỆN THAY ĐỔI CHECKBOX ---
+    // --- XÓA SỐ TIỀN ĐÓNG CỦA 1 NGƯỜI (bằng cách xóa transactions họ là payer) ---
+    function clearContribution(name) {
+        if (!confirm(`Bạn có chắc chắn muốn xóa tất cả giao dịch do ${name} trả không?`)) return;
+        // loại bỏ tất cả transaction có payer = name
+        transactions = transactions.filter(t => t.payer !== name);
+        calculateAndUpdate(true);
+    }
+
+    // --- TOGGLE participation (chỉ ảnh hưởng tới lần nhập tiếp theo) ---
     function toggleParticipation(name) {
         const checkbox = document.getElementById(`participate-${name.replace(/\s/g, '-')}`);
-        participation[name] = checkbox.checked; 
-        calculateAndUpdate(false); // Không cần vẽ lại bảng khi tích/bỏ tích
+        participation[name] = checkbox.checked;
+        // không cần render table toàn bộ, chỉ lưu trạng thái checkbox
+        saveData().catch(err => console.error("Lỗi save participation:", err));
     }
 
-    // --- CÁC HÀM XỬ LÝ TƯƠNG TÁC (Thêm tiền) ---
-
+    // --- THÊM TRANSACTION --- 
     function addContribution(name) {
         const inputElement = document.getElementById(`input-${name.replace(/\s/g, '-')}`);
-        const amount = parseFloat(inputElement.value) * K_UNIT || 0;
-        
-        if (amount > 0) {
-            contributions[name] += amount;
+        const raw = parseFloat(inputElement.value);
+        const amount = (!isNaN(raw) ? raw : 0) * K_UNIT;
+
+        if (amount <= 0) {
+            alert("Vui lòng nhập số tiền dương (đơn vị k).");
             inputElement.value = '';
-            calculateAndUpdate(true); // Cần vẽ lại để cập nhật nút Xóa/Tiền Đóng
-        } else if (amount < 0) {
-             alert("Vui lòng nhập số tiền chi tiêu dương.");
-             inputElement.value = '';
+            return;
         }
+
+        // lấy danh sách người đang được tick tại thời điểm bấm thêm
+        const currentParticipants = MEMBER_NAMES.filter(n => {
+            const cb = document.getElementById(`participate-${n.replace(/\s/g, '-')}`);
+            return cb && cb.checked;
+        });
+
+        if (currentParticipants.length === 0) {
+            alert("Chưa chọn ai để chia tiền! Vui lòng đánh dấu người tham gia trước khi thêm.");
+            return;
+        }
+
+        // tạo transaction
+        const tx = {
+            payer: name,
+            amount: amount,
+            participants: currentParticipants
+        };
+        transactions.push(tx);
+
+        inputElement.value = '';
+        calculateAndUpdate(true);
     }
 
-    // --- CÁC HÀM XỬ LÝ GIAO DIỆN VÀ KHỞI TẠO ---
-    // HÀM NÀY CHỈ DÙNG ĐỂ VẼ CẤU TRÚC LẦN ĐẦU VÀ CẬP NHẬT NÚT XÓA
-
+    // --- VẼ BẢNG (render) ---
     function renderTable() {
         const tbody = document.getElementById('contributionTableBody');
-        // Nếu đã có cấu trúc, không vẽ lại (tránh lỗi)
+
+        // nếu chưa có hàng thì tạo; nếu đã có đủ hàng (số member) chỉ cập nhật nút/txt
         if (tbody.children.length === MEMBER_NAMES.length) {
-            // Cập nhật lại HTML của ô Tiền Đóng để cập nhật nút Xóa
+            // cập nhật các ô
             MEMBER_NAMES.forEach(name => {
-                const safeName = name.replace(/\s/g, '-');
-                const cell = document.querySelector(`#total-${safeName}`).closest('td');
-                
-                if (cell) {
-                    cell.innerHTML = `
-                        <div class="contribution-cell">
-                            <span class="contribution-total" id="total-${safeName}">${formatContributionTotal(contributions[name])}</span>
-                            <button class="clear-button" onclick="clearContribution('${name}')">Xóa</button>
-                        </div>
-                    `;
+                const safe = name.replace(/\s/g, '-');
+                // update total và balance và checkbox trạng thái
+                const totalEl = document.getElementById(`total-${safe}`);
+                if (totalEl) totalEl.textContent = formatContributionTotal(contributions[name] || 0);
+
+                const balEl = document.getElementById(`balance-${safe}`);
+                if (balEl) {
+                    const bal = (contributions[name] || 0) - (mustPay[name] || 0);
+                    balEl.className = 'balance-status';
+                    if (Math.abs(bal) < 10) {
+                        balEl.classList.add('neutral'); balEl.textContent = '+0k';
+                    } else if (bal > 0) {
+                        balEl.classList.add('positive'); balEl.textContent = formatCurrency(bal);
+                    } else {
+                        balEl.classList.add('negative'); balEl.textContent = formatCurrency(bal);
+                    }
                 }
+
+                const cb = document.getElementById(`participate-${safe}`);
+                if (cb) cb.checked = participation[name];
             });
             return;
         }
 
-        // VẼ CẤU TRÚC LẦN ĐẦU
+        // lần đầu vẽ
         tbody.innerHTML = '';
-        
         MEMBER_NAMES.forEach(name => {
+            const safeName = name.replace(/\s/g, '-');
             const row = document.createElement('tr');
-            const safeName = name.replace(/\s/g, '-'); 
-            
+
             row.innerHTML = `
                 <td>
                     <input 
                         type="checkbox" 
                         class="participation-checkbox"
-                        id="participate-${safeName}" 
+                        id="participate-${safeName}"
                         ${participation[name] ? 'checked' : ''}
                         onchange="toggleParticipation('${name}')"
                     >
@@ -403,7 +424,7 @@
                 <td>${name}</td>
                 <td>
                     <div class="contribution-cell">
-                        <span class="contribution-total" id="total-${safeName}">${formatContributionTotal(contributions[name])}</span>
+                        <span class="contribution-total" id="total-${safeName}">${formatContributionTotal(contributions[name] || 0)}</span>
                         <button class="clear-button" onclick="clearContribution('${name}')">Xóa</button>
                     </div>
                 </td>
@@ -426,34 +447,37 @@
             tbody.appendChild(row);
         });
     }
-    
+
+    // --- XÓA TẤT CẢ (reset) ---
     function resetContributions() {
-        if (confirm("Bạn có chắc chắn muốn xóa tất cả số tiền đã đóng góp không? Dữ liệu sẽ bị xóa khỏi tất cả thiết bị.")) {
-            MEMBER_NAMES.forEach(name => {
-                contributions[name] = 0;
-                participation[name] = true; 
-                const inputElement = document.getElementById(`input-${name.replace(/\s/g, '-')}`);
-                if (inputElement) {
-                    inputElement.value = '';
-                }
-            });
-            
-            dbRef.set({
-                contributions: contributions,
-                participation: participation
+        if (!confirm("Bạn có chắc chắn muốn xóa tất cả số tiền đã đóng góp không? Dữ liệu sẽ bị xóa khỏi tất cả thiết bị.")) return;
+
+        // reset local structures
+        transactions = [];
+        MEMBER_NAMES.forEach(name => {
+            contributions[name] = 0;
+            mustPay[name] = 0;
+            participation[name] = true;
+            const inputElement = document.getElementById(`input-${name.replace(/\s/g, '-')}`);
+            if (inputElement) inputElement.value = '';
+        });
+
+        // lưu vào firebase
+        saveData()
+            .then(() => {
+                calculateAndUpdate(true);
             })
-                .then(() => {
-                    calculateAndUpdate(true); // Tính toán và gọi renderTable
-                })
-                .catch((error) => {
-                    console.error("Lỗi khi xóa dữ liệu Firebase: ", error);
-                    alert("Lỗi: Không thể xóa dữ liệu trên Firebase.");
-                });
-        }
+            .catch(err => {
+                console.error("Lỗi khi xóa dữ liệu Firebase: ", err);
+                alert("Lỗi: Không thể xóa dữ liệu trên Firebase.");
+            });
     }
 
-    document.addEventListener('DOMContentLoaded', loadContributions);
+    // --- Khởi tạo ---
+    document.addEventListener('DOMContentLoaded', () => {
+        renderTable();
+        loadData();
+    });
 </script>
 </body>
 </html>
-
